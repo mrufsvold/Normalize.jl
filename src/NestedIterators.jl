@@ -7,7 +7,6 @@ using ..NameLists: NameID, no_name_id
 import ..get_name
 import ..get_id
 import ..make_switch
-import ..opcompose
 
 
 struct CaptureListNil end
@@ -90,7 +89,7 @@ get_unique_val(rni::RawNestedIterator) = rni.unique_val
 get_el_type(rni::RawNestedIterator) = rni.el_type
 
 
-"""NestedIterator is a finalized column with a custom function to reproduce the order 
+"""NestedIterator is a finalized column with a custom function to reproduce the order
 that the data was found and unpacked"""
 struct NestedIterator{T,F} <: AbstractArray{T, 1}
     get_index::F
@@ -147,12 +146,12 @@ struct Seed{T}
 end
 (s::Seed)(i) = s.data[i]
 struct RawSeed
-    data_id::NameID 
+    data_id::NameID
 end
 Seed(csm, raw_seed::RawSeed) = get_name(csm, raw_seed.data_id)
 
 """Captures the repeat value for a repeat_each call"""
-struct UnrepeatEach 
+struct UnrepeatEach
     n::Int64
 end
 (u::UnrepeatEach)(i) = ceil(Int64, i/u.n)
@@ -175,7 +174,7 @@ end
 function cycle(c::RawNestedIterator, n)
     original_len = c.column_length
     @reset c.column_length = original_len * n
-    
+
     # when there is only one unique value, we can skip composing the uncycle step
     c.one_value && return c
 
