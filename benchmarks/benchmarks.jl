@@ -22,8 +22,15 @@ function make_deep_dict(depth=1)
     )
 end
 deep_dict = make_deep_dict(7)
-                
-# expand(small_dict; lazy_columns=true, column_style=:nested)
+
+@b ExpandNestedData.expand(small_dict; lazy_columns=false, column_style=:flat, use_v2=false)
+@b ExpandNestedData.expand(small_dict; lazy_columns=false, column_style=:flat, use_v2=true)
+
+@b ExpandNestedData.expand(many_records; lazy_columns=false, column_style=:flat, use_v2=false)
+@b ExpandNestedData.expand(many_records; lazy_columns=false, column_style=:flat, use_v2=true)
+
+@b ExpandNestedData.expand(deep_dict; lazy_columns=false, column_style=:flat, use_v2=false)
+@b ExpandNestedData.expand(deep_dict; lazy_columns=false, column_style=:flat, use_v2=true)
 # @btime expand($small_dict; lazy_columns=true, column_style=:nested)
 # @profview ExpandNestedData.expand(small_dict; lazy_columns=true, column_style=:nested);
 

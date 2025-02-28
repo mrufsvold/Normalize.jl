@@ -8,7 +8,7 @@ using Pkg
 Pkg.add("ExpandNestedData")
 ```
 ### Basic Usage
-ExpandNestedData provides a single function `expand` to flatten out nested data. 
+ExpandNestedData provides a single function `expand` to flatten out nested data.
 
 ```@example 1
 using ExpandNestedData # hide
@@ -65,12 +65,12 @@ expand(message, column_defs) |> DataFrame
 ```
 
 ### ColumnStyles
-In the examples above, we've used `flat_columns` style. However, we can also maintain the nesting hierarchy of the source data. 
+In the examples above, we've used `flat_columns` style. However, we can also maintain the nesting hierarchy of the source data.
 
 ```@example 1
 using TypedTables
 
-tbl = expand(message; column_style = nested_columns)
+tbl = expand(message; column_style = :nested)
 ```
 Now, our table has its columns nested, so we can access a specific column using `dot` syntax.
 

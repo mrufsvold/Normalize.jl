@@ -1,17 +1,19 @@
+using ScopedValues: with
+
 import .NestedIterators: RawNestedIterator
-import .ColumnSetManagers: ColumnSet, cycle_columns_to_length!, repeat_each_column!, get_first_key, 
+import .ColumnSetManagers: ColumnSet, cycle_columns_to_length!, repeat_each_column!, get_first_key,
                 get_total_length, column_length, set_length!, free_column_set!, build_final_column_set
 import .PathGraph: make_path_graph, get_children, SimpleNode
 import .ColumnDefinitions: construct_column_definitions
 
 
 """
-    expand(data, column_defs=nothing; 
-            default_value = missing, 
+    expand(data, column_defs=nothing;
+            default_value = missing,
             lazy_columns::Bool = false,
-            pool_arrays::Bool = false, 
+            pool_arrays::Bool = false,
             column_names::Dict = Dict{Tuple, Symbol}(),
-            column_style::Symbol=:flat, 
+            column_style::Symbol=:flat,
             name_join_pattern = "_")
 
 Expand a nested data structure into a Tables
@@ -23,20 +25,29 @@ Expand a nested data structure into a Tables
 * `lazy_columns::Bool` - If true, return columns using a lazy iterator. If false, `collect` into regular vectors before returning. Default: `true` (don't collect).
 * `pool_arrays::Bool` - If true, use pool arrays to `collect` the columns. Default: `false`.
 * `column_names::Dict{Tuple, Symbol}` - A lookup to replace column names in the final result with any other symbol
-* `column_style::Symbol` - Choose returned column style from `:nested` or `:flat`. If nested, `column_names` are ignored 
+* `column_style::Symbol` - Choose returned column style from `:nested` or `:flat`. If nested, `column_names` are ignored
     and a TypedTables.Table is returned in which the columns are nested in the same structure as the source data. Default: `:flat`
 * `name_join_pattern::String` - A pattern to put between the keys when joining the path into a column name. Default: `"_"`.
 ## Returns
 `::NamedTuple` when `column_style = :flat` or `TypedTable.Table` when `column_style = :nested`.
 """
-function expand(data, column_definitions=nothing; 
-        default_value = missing, 
+function expand(data, column_definitions=nothing;
+        default_value = missing,
         lazy_columns::Bool = false,
-        pool_arrays::Bool = false, 
+        pool_arrays::Bool = false,
         column_names::Dict = Dict{Tuple, Symbol}(),
-        column_style::Symbol=:flat, 
-        name_join_pattern = "_")
+        column_style::Symbol=:flat,
+        name_join_pattern = "_",
+        use_v2=false
+        )
     typed_column_style = get_column_style(column_style)
+
+    if use_v2 && isnothing(column_definitions) && typed_column_style == flat_columns
+        with(ExpandNestedData2.DEFAULT_MISSING) do
+            return ExpandNestedData2.expand(data; pool_arrays=pool_arrays, lazy_columns=lazy_columns, name_join_pattern=name_join_pattern)
+        end
+    end
+
     csm = ColumnSetManager()
     path_graph = make_path_graph(csm, column_definitions)
 
@@ -62,7 +73,7 @@ function create_columns(data, path_graph, csm, default_value=missing)
     @assert length(default_column) == 1 "The default value must have a length of 1. If you want the value to have a length, try wrapping in a Tuple with `(default_val,)`"
     column_stack = ColumnSet[]
     instruction_stack = Stack{UnpackStep}()
-    
+
     push!(instruction_stack, wrap_object(NameList(), data, path_graph))
 
     while !isempty(instruction_stack)
@@ -71,7 +82,7 @@ function create_columns(data, path_graph, csm, default_value=missing)
     end
     @assert length(column_stack) == 1 "Internal Error, more than one column stack resulted"
     return first(column_stack)
-end 
+end
 
 
 
@@ -99,7 +110,7 @@ Take a value at the end of a path and wrap it in a new ColumnSet
 """
 function process_leaf!(name_list, data, instruction_stack, csm)
     push!(instruction_stack, init_column_set_step(csm, name_list, data))
-end 
+end
 
 """
     create_default_column_set!(step, default_column, column_stack, csm)
@@ -115,7 +126,7 @@ end
 """
     process_dict!(step::UnpackStep, instruction_stack)
 
-Handle a NameValuePair container (struct or dict) by calling process on all values with a 
+Handle a NameValuePair container (struct or dict) by calling process on all values with a
 new UnpackStep that has a name matching the key. If ColumnDefinitions are provided, then
 only grab the keys that apply and add default columns where a key is missing.
 """
@@ -145,7 +156,7 @@ function process_dict!(parent_name_list, data, node, instruction_stack, csm)
         name = get_name(csm, name_id)
         child_data = get_value(data, name, ExpandMissing())
         @debug "child data retrieved" data=child_data
-        data_has_name = name_id in data_name_ids 
+        data_has_name = name_id in data_name_ids
         next_step = @cases child_node begin
             Path => wrap_container_val(data_has_name, name_list, child_data, child_node, csm)
             Value => wrap_object(name_list, child_data, child_node, LeafStep)
@@ -157,7 +168,7 @@ function process_dict!(parent_name_list, data, node, instruction_stack, csm)
     return nothing
 end
 
-""" 
+"""
 process_array!(step::UnpackStep, instruction_stack)
 Handle each element of an array
 If it is empty, return default value.
@@ -170,7 +181,7 @@ function process_array!(name_list, arr::T, node, instruction_stack, csm) where {
     element_count = length(arr)::Int64
     @debug "Processing array" dtype=T arr_len=element_count
     if element_count == 0
-        # If we have column defs, but the array is empty, that means we need to make a 
+        # If we have column defs, but the array is empty, that means we need to make a
         # missing column_set
         @cases node begin
             [Path,Value] => empty_arr_path!(csm, node, instruction_stack)
@@ -178,10 +189,10 @@ function process_array!(name_list, arr::T, node, instruction_stack, csm) where {
         end
         return nothing
     elseif element_count == 1
-        @cases node begin 
+        @cases node begin
             [Path,Value,Simple] => push!(instruction_stack, wrap_object(name_list, first(arr), node))
         end
-        
+
         return nothing
     elseif all_eltypes_are_values(T)
         push!(instruction_stack, init_column_set_step(csm, name_list, arr))
