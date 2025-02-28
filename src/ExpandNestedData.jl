@@ -29,7 +29,7 @@ import .ColumnDefinitions: ColumnDefinition
 include("PathGraph.jl")
 include("ExpandedTable.jl")
 include("CoreHelpers.jl")
-
+include("ExpandNestedData2.jl")
 # Here is where the main logic starts
 include("Core.jl")
 

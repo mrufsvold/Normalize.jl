@@ -1,3 +1,5 @@
+.vscode/settings.json
+playground.jl
 develop
 */Manifest.toml
 runner.jl
