@@ -18,11 +18,11 @@ TypedTables = "9d95f2ec-7b3d-5a63-8d20-e2491e220bb9"
 
 [compat]
 Accessors = "0.1"
-AutoHashEquals = "2.2.0"
+AutoHashEquals = "2.2"
 Compat = "3.42, 4"
 DataStructures = "0.18.14"
 PooledArrays = "1.4"
-ScopedValues = "1.3.0"
+ScopedValues = "1.3"
 StructTypes = "1.10"
 SumTypes = "0.4, 0.5"
 Tables = "1"
