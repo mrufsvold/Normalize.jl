@@ -42,12 +42,13 @@ function expand(data, column_definitions=nothing;
         )
     typed_column_style = get_column_style(column_style)
 
-    if use_v2 && isnothing(column_definitions) && typed_column_style == flat_columns
+    if use_v2 && isnothing(column_definitions)
         return with(ExpandNestedData2.DEFAULT_MISSING => default_value) do
             ExpandNestedData2.expand(data;
                 pool_arrays=pool_arrays,
                 lazy_columns=lazy_columns,
-                name_join_pattern=name_join_pattern
+                name_join_pattern=name_join_pattern,
+                column_style=column_style
                 )
         end
     end

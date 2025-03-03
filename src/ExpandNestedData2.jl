@@ -10,12 +10,12 @@ using TypedTables: FlexTable
 
 NameValueContainer = Union{StructTypes.DictType, StructTypes.DataType}
 
+@enum ColumnStyle flat_columns nested_columns
 @enum PoolArrayOptions NEVER ALWAYS AUTO
 
 const DEFAULT_MISSING = ScopedValue(missing)
 
 include("PathGraph2.jl")
-
 
 if false
     IterCapture = nothing
@@ -35,21 +35,29 @@ end
 NamePart(;name=nothing) = NamePart(name)
 
 @auto_hash_equals struct NamePath
-    len::Int
     parts::Vector{NamePart}
 end
-NamePath() = NamePath(0, NamePart[])
+NamePath() = NamePath(NamePart[])
 
 function append(np::NamePath, name)
     new_parts = copy(np.parts)
     push!(new_parts, NamePart(name))
-    return NamePath(np.len + 1, new_parts)
+    return NamePath(new_parts)
 end
 function Base.string(np::NamePath)
     return join((np.parts[i].name for i in 1:np.len), ".")
 end
 function Base.getindex(np::NamePath, i::Int)
     return np.parts[i].name
+end
+function Base.length(np::NamePath)
+    return length(np.parts)
+end
+function Base.lastindex(np::NamePath)
+    return length(np.parts)
+end
+function Base.firstindex(np::NamePath)
+    return 1
 end
 
 
@@ -144,14 +152,19 @@ end
 Base.length(c::Column) = length(c.data)
 Base.eltype(c::Column) = eltype(c.data)
 function Base.collect(c::Column; pool_arrays)
-    if pool_arrays
+    if pool_arrays == AUTO
         pool_up_to = length(c) ÷ 5
         seeds = get_all_seeds(c.data, pool_up_to)
         if !isnothing(seeds)
             return PooledArray(c.data)
         end
+    elseif pool_arrays == ALWAYS
+        return PooledArray(c.data)
     end
     return collect(c.data)
+end
+function get_name_path(c::Column)
+    return c.name
 end
 
 function expand(data;
@@ -170,6 +183,10 @@ function expand(data;
             )...
         )
     end
+
+    name_paths = get_name_path.(col_set)
+    path_graph = make_path_graph(name_paths)
+    make_nested_table(col_set, path_graph)
 end
 
 function join_name_path(np::NamePath, join_pattern)
@@ -273,6 +290,27 @@ end
 
 function _expand_leaf(@nospecialize(data), name_path::NamePath)
     return Column[Column(name_path, seed(data))]
+end
+
+
+function make_nested_table(column_set, path_graph::PathNode, name_path::NamePath=NamePath())
+    return @cases path_graph begin
+        [TopLevelNode, BranchNode] => table_from_children(column_set, path_graph, name_path)
+        LeafNode(name, _, pool_arrays, _) => collect(
+            get_column(column_set, name_path); pool_arrays=pool_arrays)
+    end
+end
+
+function table_from_children(column_set, path_graph, name_path)
+    children = get_children(path_graph)
+    return FlexTable(;
+        (
+            Symbol(string(get_name(child))) =>make_nested_table(
+                column_set, child, append(name_path, get_name(child))
+            )
+            for child in children
+        )...
+    )
 end
 
 end # END MODULE HERE #
