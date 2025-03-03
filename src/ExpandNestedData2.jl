@@ -5,12 +5,17 @@ using AutoHashEquals: @auto_hash_equals
 using SumTypes: @sum_type, @cases
 using StructTypes: StructTypes
 using PooledArrays: PooledArray
+using TypedTables: FlexTable
+
 
 NameValueContainer = Union{StructTypes.DictType, StructTypes.DataType}
 
+@enum PoolArrayOptions NEVER ALWAYS AUTO
 
 const DEFAULT_MISSING = ScopedValue(missing)
-const DEFAULT_EMPTY = ScopedValue(nothing)
+
+include("PathGraph2.jl")
+
 
 if false
     IterCapture = nothing
@@ -42,6 +47,9 @@ function append(np::NamePath, name)
 end
 function Base.string(np::NamePath)
     return join((np.parts[i].name for i in 1:np.len), ".")
+end
+function Base.getindex(np::NamePath, i::Int)
+    return np.parts[i].name
 end
 
 
@@ -149,13 +157,19 @@ end
 function expand(data;
         pool_arrays=false,
         lazy_columns=false,
-        name_join_pattern="_"
+        name_join_pattern="_",
+        column_style=:flat
     )
     col_set = _expand(data, NamePath())
-    return NamedTuple(
-        join_name_path(c.name, name_join_pattern) => lazy_columns ? c.data : collect(c; pool_arrays=pool_arrays)
-        for c in col_set
-    )
+
+    if column_style == :flat
+        return FlexTable(;
+            (
+                join_name_path(c.name, name_join_pattern) => lazy_columns ? c.data : collect(c; pool_arrays=pool_arrays)
+                for c in col_set
+            )...
+        )
+    end
 end
 
 function join_name_path(np::NamePath, join_pattern)
