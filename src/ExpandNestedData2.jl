@@ -9,6 +9,9 @@ using TypedTables: FlexTable
 
 
 NameValueContainer = Union{StructTypes.DictType, StructTypes.DataType}
+Container = Union{NameValueContainer, StructTypes.ArrayType}
+
+is_container(t) = typeof(StructTypes.StructType(t)) <: Container
 
 @enum ColumnStyle flat_columns nested_columns
 @enum PoolArrayOptions NEVER ALWAYS AUTO
@@ -56,7 +59,7 @@ end
 function Base.lastindex(np::NamePath)
     return length(np.parts)
 end
-function Base.firstindex(np::NamePath)
+function Base.firstindex(::NamePath)
     return 1
 end
 
@@ -72,6 +75,7 @@ current_path_name(name_path::NamePath, level) = name_path.parts[level]
 ###### Iter Instruction Types
 @sum_type IterCapture{T} <: AbstractVector{T} :hidden begin
     Seed{T}(data::T)
+    SeedVector{T}(data::Vector{T})
     Repeat{T}(len::Int, child::IterCapture{T}, n::Int)
     Cycle{T}(len::Int, child::IterCapture{T})
     Concat(len::Int, children_n::Int, children::Vector{Pair{Int,IterCapture}})
@@ -80,7 +84,7 @@ function get_children(ic::IterCapture)
     @cases ic begin
         Concat(_, _, children) => map(last, children)
         [Repeat, Cycle](_, child,_) => (child,)
-        Seed => nothing
+        [Seed, SeedVector] => nothing
     end
 end
 
@@ -89,6 +93,7 @@ Base.eltype(::IterCapture{T}) where T = T
 function Base.length(ic::IterCapture{T}) where T
     @cases ic begin
         Seed => 1
+        SeedVector(data) => length(data)
         [Repeat, Cycle, Concat](len, _...) => len
     end
 end
@@ -96,6 +101,7 @@ end
 function get_all_seeds(ic::IterCapture, up_to::Int=64)
     seeds = @cases ic begin
         Seed(data) => Set((data,))
+        SeedVector(data) => Set(data)
         [Repeat, Cycle,](_, child) => get_all_seeds(child)
         Concat(_, _, children) => union((get_all_seeds(last(child)) for child in children)...)
     end
@@ -113,6 +119,17 @@ end
 
 Base.size(ic::IterCapture) = (length(ic),)
 seed(data::T) where T = IterCapture'.Seed{T}(data)
+function seed_vector(@nospecialize(data))
+    if length(data) == 0
+        return seed(DEFAULT_MISSING[])
+    elseif length(data) == 1
+        return seed(only(data))
+    elseif data isa Vector
+        return IterCapture'.SeedVector{eltype(data)}(data)
+    end
+    return IterCapture'.SeedVector{eltype(data)}(collect(data))
+end
+
 repeat(ic::IterCapture{T}, n::Int) where T= IterCapture'.Repeat{T}(n*length(ic), ic, n)
 cycle(ic::IterCapture{T}, n::Int) where T = IterCapture'.Cycle{T}(n*length(ic), ic)
 function concat(ics)
@@ -138,9 +155,10 @@ function Base.getindex(current_ic::IterCapture{T}, i::Int) where T
     length(current_ic) < i && throw(BoundsError(current_ic, i))
     return @cases current_ic begin
         Seed(data) => data::T
-        Repeat(len, ic, n) => ic[ceil(Int64, i/n)]
-        Cycle(len, ic) => ic[mod((i-1), length(ic)) + 1]
-        Concat(_, n, children) => unconcat(i, children, T)
+        SeedVector(data) => data[i]::T
+        Repeat(len, ic, n) => ic[ceil(Int64, i/n)]::T
+        Cycle(len, ic) => ic[mod((i-1), length(ic)) + 1]::T
+        Concat(_, n, children) => unconcat(i, children, T)::T
     end
 end
 
@@ -176,7 +194,8 @@ function expand(data;
     col_set = _expand(data, NamePath())
 
     if column_style == :flat
-        return FlexTable(;
+        # TODO make this a FlexTable before 2.0
+        return (;
             (
                 join_name_path(c.name, name_join_pattern) => lazy_columns ? c.data : collect(c; pool_arrays=pool_arrays)
                 for c in col_set
@@ -230,20 +249,24 @@ function _expand_name_value_container(@nospecialize(data), @nospecialize(names),
 end
 
 function merge_columns!(list_of_column_sets)
-    column_set = pop!(list_of_column_sets)
-    multiplier = length(column_set[1])
-    while length(list_of_column_sets) > 0
-        new_column_set = pop!(list_of_column_sets)
-        if length(new_column_set) == 0
-            continue
-        end
-        # Need to repeat each value for all of the values of the previous children
-        # to make a product of values
-        repeated_column_set = map(c -> cycle_column(c, multiplier), new_column_set)
-        multiplier = length(repeated_column_set[1])
-        append!(column_set, repeated_column_set)
+    if isempty(list_of_column_sets)
+        return Column[]
     end
-    return map(c -> cycle_column(c, multiplier ÷ length(c)), column_set)
+    column_set = reduce(merge_columns!, list_of_column_sets)
+    multiplier = length(last(column_set))
+    map(c -> cycle_column(c, multiplier ÷ length(c)), column_set)
+end
+function merge_columns!(column_set1, column_set2)
+    if isempty(column_set1)
+        return column_set2
+    elseif isempty(column_set2)
+        return column_set1
+    end
+
+    multiplier = length(last(column_set1))
+    repeated_column_set = map(c -> cycle_column(c, multiplier), column_set2)
+    append!(column_set1, repeated_column_set)
+    return column_set1
 end
 
 function cycle_column(column, n)
@@ -262,13 +285,33 @@ function Base.vcat(columns::Column...)
 end
 
 function _expand_array(@nospecialize(data), name_path)
-    if isempty(data)
+    element_count = length(data)
+
+    if element_count == 0
         return Column[Column(name_path, seed(DEFAULT_MISSING[]))]
+    elseif element_count == 1
+        return _expand(only(data), name_path)
     end
-    expanded = map(_expand, data, Iterators.repeated(name_path))
-    no_empties = filter(!isempty, expanded)
+
+    container_count = sum(is_container, data)
+
+    # No containers at all
+    if container_count == 0
+        return Column[Column(name_path, seed_vector(data))]
+    end
+
+    containers = Iterators.filter(is_container, data)
+    expanded = Iterators.map(_expand, containers, Iterators.repeated(name_path))
+    no_empties = collect(Iterators.filter(!isempty, expanded))
     all_names = Set(Iterators.flatmap(c -> (x.name for x in c), no_empties))
-    return Column[stack_columns(no_empties, name) for name in all_names]
+    stacked_columns = Column[stack_columns(no_empties, name) for name in all_names]
+
+    if container_count != element_count
+        loose_values = filter(!is_container, data)
+        loose_columns = Column[Column(name_path, seed_vector(loose_values))]
+        return merge_columns!((loose_columns, stacked_columns))
+    end
+    return stacked_columns
 end
 
 function stack_columns(column_sets, name)
